@@ -454,6 +454,12 @@ button {
   border-color: rgba(255, 255, 255, 0.24);
 }
 
+.admin-console .button-danger {
+  color: #fff0f0;
+  background: linear-gradient(180deg, rgba(180, 73, 92, 0.95), rgba(126, 34, 51, 0.95));
+  border-color: rgba(255, 154, 171, 0.34);
+}
+
 .admin-console .button:disabled {
   cursor: not-allowed;
   opacity: 0.48;

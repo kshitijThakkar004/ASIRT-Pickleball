@@ -37,8 +37,11 @@ function stageLabel(stage: Match["stage"]) {
 }
 
 export function AdminConsole() {
-  const { tournament, players, groups, groupPlayers, matches, loading, error, isDemo, refresh } = useTournamentData();
+  const { tournament, players, groups, groupPlayers, matches, loading, error, isDemo, refresh } = useTournamentData({
+    startWithDemo: false
+  });
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
+  const [isAdminUser, setIsAdminUser] = useState<boolean | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [search, setSearch] = useState("");
   const [playerDraft, setPlayerDraft] = useState("");
@@ -47,7 +50,7 @@ export function AdminConsole() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const supabaseConfigured = Boolean(getSupabaseBrowserClient());
   const leaderboard = calculateLeaderboard(players.filter((player) => player.is_active), matches);
-  const canEdit = Boolean(supabaseConfigured && sessionEmail);
+  const canEdit = Boolean(supabaseConfigured && sessionEmail && isAdminUser);
 
   const filteredPlayers = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -81,6 +84,54 @@ export function AdminConsole() {
     };
   }, []);
 
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
+    if (!supabase || !sessionEmail) {
+      setIsAdminUser(null);
+      return;
+    }
+
+    let isMounted = true;
+
+    void supabase.rpc("is_admin").then(({ data, error: rpcError }) => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (rpcError) {
+        setIsAdminUser(false);
+        return;
+      }
+
+      setIsAdminUser(Boolean(data));
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [sessionEmail]);
+
+  function formatActionError(actionError: unknown) {
+    if (!(actionError instanceof Error)) {
+      return "Something went wrong.";
+    }
+
+    const message = actionError.message.toLowerCase();
+
+    if (
+      message.includes("row-level security") ||
+      message.includes("permission denied") ||
+      message.includes("violates row-level security policy")
+    ) {
+      return sessionEmail
+        ? `${sessionEmail} is signed in, but it is not allowed to edit this tournament yet. Add this email to public.admin_users in Supabase, then refresh the page.`
+        : "This action needs an organizer account that is listed in public.admin_users.";
+    }
+
+    return actionError.message;
+  }
+
   async function runAction(key: string, action: () => Promise<void>) {
     setBusyKey(key);
     setStatusMessage(null);
@@ -90,7 +141,7 @@ export function AdminConsole() {
       await action();
       await refresh();
     } catch (actionError) {
-      setErrorMessage(actionError instanceof Error ? actionError.message : "Something went wrong.");
+      setErrorMessage(formatActionError(actionError));
     } finally {
       setBusyKey(null);
     }
@@ -438,6 +489,105 @@ export function AdminConsole() {
     });
   }
 
+  async function clearSchedule() {
+    if (!tournament) {
+      setErrorMessage("There is no tournament schedule to clear yet.");
+      return;
+    }
+
+    if (!window.confirm("Clear all groups and matches, but keep the tournament shell and roster?")) {
+      return;
+    }
+
+    await runAction("clear-schedule", async () => {
+      const supabase = await requireSupabase();
+
+      const deleteMatches = await supabase.from("matches").delete().eq("tournament_id", tournament.id);
+
+      if (deleteMatches.error) {
+        throw deleteMatches.error;
+      }
+
+      const groupIds = groups.map((group) => group.id);
+
+      if (groupIds.length > 0) {
+        const deleteGroupPlayers = await supabase.from("group_players").delete().in("group_id", groupIds);
+
+        if (deleteGroupPlayers.error) {
+          throw deleteGroupPlayers.error;
+        }
+
+        const deleteGroups = await supabase.from("groups").delete().in("id", groupIds);
+
+        if (deleteGroups.error) {
+          throw deleteGroups.error;
+        }
+      }
+
+      const updateTournament = await supabase.from("tournaments").update({ status: "setup" }).eq("id", tournament.id);
+
+      if (updateTournament.error) {
+        throw updateTournament.error;
+      }
+
+      setStatusMessage("Schedule cleared. The roster is still available.");
+    });
+  }
+
+  async function deleteTournament() {
+    if (!tournament) {
+      setErrorMessage("There is no tournament to delete yet.");
+      return;
+    }
+
+    if (!window.confirm("Delete the tournament and all of its matches? The player roster will stay.")) {
+      return;
+    }
+
+    await runAction("delete-tournament", async () => {
+      const supabase = await requireSupabase();
+      const { error: deleteError } = await supabase.from("tournaments").delete().eq("id", tournament.id);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      setStatusMessage("Tournament deleted. The roster is still available.");
+    });
+  }
+
+  async function resetAllData() {
+    if (
+      !window.confirm(
+        "Reset everything? This removes the tournament, groups, matches, and roster from Supabase."
+      )
+    ) {
+      return;
+    }
+
+    await runAction("reset-all", async () => {
+      const supabase = await requireSupabase();
+
+      if (tournament) {
+        const { error: tournamentDeleteError } = await supabase.from("tournaments").delete().eq("id", tournament.id);
+
+        if (tournamentDeleteError) {
+          throw tournamentDeleteError;
+        }
+      }
+
+      if (players.length > 0) {
+        const { error: playerDeleteError } = await supabase.from("players").delete().neq("id", "");
+
+        if (playerDeleteError) {
+          throw playerDeleteError;
+        }
+      }
+
+      setStatusMessage("All tournament data has been reset.");
+    });
+  }
+
   return (
     <main className="standings-shell">
       <div className="admin-console">
@@ -483,6 +633,14 @@ export function AdminConsole() {
           {error ? <div className="message error">{error}</div> : null}
           {statusMessage ? <div className="message">{statusMessage}</div> : null}
           {errorMessage ? <div className="message error">{errorMessage}</div> : null}
+          {supabaseConfigured && !sessionEmail ? (
+            <div className="message">Sign in with an organizer email that has been added to `public.admin_users`.</div>
+          ) : null}
+          {sessionEmail && isAdminUser === false ? (
+            <div className="message error">
+              {sessionEmail} is signed in, but it is not currently listed in `public.admin_users`, so edit actions stay locked.
+            </div>
+          ) : null}
 
           {!supabaseConfigured ? null : !sessionEmail ? (
             <form className="login-panel" onSubmit={(event) => void sendMagicLink(event)}>
@@ -567,6 +725,45 @@ export function AdminConsole() {
             <div className="mini-row">
               <span>Current qualifiers available</span>
               <span>{leaderboard.length >= 16 ? "Top 16 ready" : `${leaderboard.length}/16 ranked`}</span>
+            </div>
+          </section>
+
+          <section className="admin-card">
+            <h3>Reset & Delete</h3>
+            <div className="admin-toolbar">
+              <button
+                className="button button-secondary"
+                disabled={!canEdit || busyKey === "clear-schedule"}
+                onClick={() => void clearSchedule()}
+              >
+                Clear schedule
+              </button>
+              <button
+                className="button button-secondary"
+                disabled={!canEdit || busyKey === "delete-tournament"}
+                onClick={() => void deleteTournament()}
+              >
+                Delete tournament
+              </button>
+              <button
+                className="button button-danger"
+                disabled={!canEdit || busyKey === "reset-all"}
+                onClick={() => void resetAllData()}
+              >
+                Reset all data
+              </button>
+            </div>
+            <div className="mini-row">
+              <span>Clear schedule</span>
+              <span>Keeps the roster, removes groups and matches</span>
+            </div>
+            <div className="mini-row">
+              <span>Delete tournament</span>
+              <span>Removes the tournament shell and all match history</span>
+            </div>
+            <div className="mini-row">
+              <span>Reset all data</span>
+              <span>Removes tournament data and roster from Supabase</span>
             </div>
           </section>
 

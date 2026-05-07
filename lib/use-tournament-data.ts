@@ -14,15 +14,24 @@ interface UseTournamentDataResult extends TournamentState {
 
 interface UseTournamentDataOptions {
   publicDemoFallback?: boolean;
+  startWithDemo?: boolean;
 }
 
 const DEMO_STATE = createDemoState();
+const EMPTY_STATE: TournamentState = {
+  tournament: null,
+  players: [],
+  groups: [],
+  groupPlayers: [],
+  matches: []
+};
 
 export function useTournamentData(options: UseTournamentDataOptions = {}): UseTournamentDataResult {
-  const [state, setState] = useState<TournamentState>(DEMO_STATE);
+  const shouldStartWithDemo = options.startWithDemo ?? !getSupabaseBrowserClient();
+  const [state, setState] = useState<TournamentState>(shouldStartWithDemo ? DEMO_STATE : EMPTY_STATE);
   const [loading, setLoading] = useState(Boolean(getSupabaseBrowserClient()));
   const [error, setError] = useState<string | null>(null);
-  const [isDemo, setIsDemo] = useState(true);
+  const [isDemo, setIsDemo] = useState(shouldStartWithDemo);
 
   const refresh = useCallback(async () => {
     const supabase = getSupabaseBrowserClient();
