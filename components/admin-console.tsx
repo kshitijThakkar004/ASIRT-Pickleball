@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, LogOut, Shuffle, TimerReset, Trophy } from "lucide-react";
+import { CheckCircle2, ChevronLeft, LogOut, Shuffle, TimerReset } from "lucide-react";
 import { createSeedPlayers } from "@/lib/seed";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import {
@@ -439,43 +439,38 @@ export function AdminConsole() {
   }
 
   return (
-    <main className="page-shell">
-      <div className="container admin-layout">
-        <div className="top-nav">
-          <div className="brand">
-            <span className="brand-mark">
-              <Trophy size={18} />
+    <main className="standings-shell">
+      <div className="admin-console">
+        <header className="standings-topbar admin-console-topbar">
+          <Link className="icon-button" href="/" aria-label="Open public board">
+            <ChevronLeft size={20} />
+          </Link>
+          <h1>Control Room</h1>
+          {sessionEmail ? (
+            <button className="icon-button" onClick={() => void signOut()} type="button" aria-label="Sign out">
+              <LogOut size={18} />
+            </button>
+          ) : (
+            <span className="live-count" aria-label="Supabase status">
+              <CheckCircle2 size={13} />
+              <span>{supabaseConfigured ? "On" : "Off"}</span>
             </span>
-            <span>Asirt Pickleball Admin</span>
-          </div>
-          <div className="nav-links">
-            <Link className="nav-link" href="/">
-              Public board
-            </Link>
-          </div>
-        </div>
+          )}
+        </header>
 
-        <section className="panel">
-          <div className="admin-header">
-            <div>
-              <h1 className="admin-title">Tournament control room</h1>
-              <p className="section-subtitle">
-                Use this page to manage the roster, randomize groups, run multiple live courts, and progress the
-                knockout bracket.
-              </p>
-            </div>
-            <div className="badge-row">
-              <span className="badge">
+        <section className="admin-hero">
+          <div>
+            <div className="admin-kicker">Asirt Pickleball Admin</div>
+            <h2>Tournament control room</h2>
+          </div>
+          <div className="admin-status-strip">
+            <span className="badge">
                 <CheckCircle2 size={14} />
                 {supabaseConfigured ? "Supabase connected" : "Awaiting Supabase setup"}
-              </span>
-              {sessionEmail ? (
-                <button className="button button-secondary" onClick={() => void signOut()}>
-                  <LogOut size={14} />
-                  <span style={{ marginLeft: 8 }}>Sign out</span>
-                </button>
-              ) : null}
-            </div>
+            </span>
+            <Link className="badge" href="/">
+              Public board
+            </Link>
           </div>
 
           {isDemo ? (
@@ -484,7 +479,7 @@ export function AdminConsole() {
               <code> .env.local</code>, then refresh.
             </div>
           ) : null}
-          {loading ? <div className="message">Loading tournament data.</div> : null}
+          {loading && players.length === 0 ? <div className="message">Loading tournament data.</div> : null}
           {error ? <div className="message error">{error}</div> : null}
           {statusMessage ? <div className="message">{statusMessage}</div> : null}
           {errorMessage ? <div className="message error">{errorMessage}</div> : null}

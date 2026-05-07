@@ -332,6 +332,232 @@ button {
   font-size: 1rem;
 }
 
+.admin-console {
+  width: min(100%, 980px);
+  min-height: 100svh;
+  margin: 0 auto;
+  padding: max(18px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom));
+  color: #f8fbff;
+  background:
+    linear-gradient(180deg, rgba(24, 30, 80, 0.62), rgba(27, 35, 86, 0.42)),
+    radial-gradient(circle at 36% 0%, rgba(132, 149, 220, 0.28), transparent 34%);
+  box-shadow: 0 34px 80px rgba(5, 8, 26, 0.46);
+}
+
+.admin-console-topbar {
+  margin-bottom: 18px;
+}
+
+.admin-console .icon-button {
+  border: 0;
+}
+
+.admin-hero,
+.admin-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.08)),
+    rgba(45, 49, 92, 0.76);
+  box-shadow: 0 18px 36px rgba(4, 8, 28, 0.18);
+}
+
+.admin-hero {
+  display: grid;
+  gap: 15px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.admin-kicker {
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-hero h2 {
+  margin: 0;
+  color: #f8fbff;
+  font-size: 1.22rem;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.admin-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-console .badge {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.admin-console .status-banner,
+.admin-console .message,
+.admin-console .empty-state {
+  border: 1px solid rgba(172, 202, 255, 0.2);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #dbe7ff;
+}
+
+.admin-console .message.error {
+  border-color: rgba(255, 142, 142, 0.34);
+  color: #ffd1d1;
+  background: rgba(255, 120, 120, 0.12);
+}
+
+.admin-console .admin-grid {
+  gap: 14px;
+}
+
+.admin-console .admin-card {
+  padding: 15px;
+}
+
+.admin-console .admin-card h3 {
+  margin: 0;
+  color: #f8fbff;
+  font-size: 0.86rem;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.admin-console .admin-toolbar,
+.admin-console .button-row {
+  gap: 8px;
+}
+
+.admin-console .button {
+  min-height: 36px;
+  border-radius: 999px;
+  padding: 0 14px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.13);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.admin-console .button-primary {
+  color: #244076;
+  background: linear-gradient(180deg, #eef8ff, #cde6ff);
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.admin-console .button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.admin-console .mini-row {
+  min-height: 32px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.admin-console .mini-row span:last-child {
+  color: rgba(255, 255, 255, 0.92);
+  text-align: right;
+}
+
+.admin-console .field label,
+.admin-console .search-bar label {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.66rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+}
+
+.admin-console input,
+.admin-console .field input,
+.admin-console .search-bar input {
+  min-height: 39px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8fbff;
+  outline: none;
+}
+
+.admin-console input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.admin-console input:focus {
+  border-color: rgba(205, 230, 255, 0.58);
+  box-shadow: 0 0 0 3px rgba(205, 230, 255, 0.12);
+}
+
+.admin-console .player-admin-list,
+.admin-console .match-admin-list {
+  gap: 9px;
+}
+
+.admin-console .player-admin-item,
+.admin-console .match-admin-item {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.admin-console .player-admin-item {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.admin-console .toggle {
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 0.78rem;
+}
+
+.admin-console .toggle input {
+  accent-color: #cde6ff;
+}
+
+.admin-console .match-admin-item {
+  padding: 13px;
+}
+
+.admin-console .row-inline {
+  gap: 7px;
+}
+
+.admin-console .score-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 760px) {
+  .admin-console {
+    min-height: calc(100svh - 56px);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 30px;
+  }
+
+  .admin-hero {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .admin-console .admin-grid {
+    grid-template-columns: minmax(260px, 0.8fr) minmax(320px, 1fr);
+    align-items: start;
+  }
+
+  .admin-console .admin-card:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (min-width: 760px) {
   .standings-shell {
     padding: 28px;
@@ -957,4 +1183,24 @@ button {
   .score-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.admin-console .admin-card,
+.admin-console .player-admin-item,
+.admin-console .match-admin-item {
+  border-color: rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.08)),
+    rgba(45, 49, 92, 0.78);
+  color: #f8fbff;
+}
+
+.admin-console .admin-card h3 {
+  color: #f8fbff;
+}
+
+.admin-console .empty-state {
+  border-color: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.08);
 }
