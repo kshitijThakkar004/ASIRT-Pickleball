@@ -1,0 +1,322 @@
+import { Group, GroupPlayer, LeaderboardRow, Match, Player, Stage } from "@/lib/types";
+
+const GROUP_MATCH_LAYOUTS = [
+  {
+    label: "Rotation 1",
+    teamA: [0, 1],
+    teamB: [2, 3]
+  },
+  {
+    label: "Rotation 2",
+    teamA: [0, 2],
+    teamB: [1, 3]
+  },
+  {
+    label: "Rotation 3",
+    teamA: [0, 3],
+    teamB: [1, 2]
+  }
+] as const;
+
+export function shuffle<T>(values: T[]) {
+  const copy = [...values];
+
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+
+  return copy;
+}
+
+interface BuildGroupStageAssetsOptions {
+  idFactory?: () => string;
+  randomize?: boolean;
+}
+
+export function buildGroupStageAssets(
+  tournamentId: string,
+  playerIds: string[],
+  options: BuildGroupStageAssetsOptions = {}
+) {
+  if (playerIds.length === 0 || playerIds.length % 4 !== 0) {
+    throw new Error("Active players must be divisible into groups of 4.");
+  }
+
+  const idFactory = options.idFactory ?? (() => crypto.randomUUID());
+  const shuffledPlayerIds = options.randomize === false ? [...playerIds] : shuffle(playerIds);
+  const groups: Group[] = [];
+  const groupPlayers: GroupPlayer[] = [];
+  const matches: Match[] = [];
+
+  for (let index = 0; index < shuffledPlayerIds.length; index += 4) {
+    const groupNumber = index / 4 + 1;
+    const groupId = idFactory();
+    const groupRoster = shuffledPlayerIds.slice(index, index + 4);
+
+    groups.push({
+      id: groupId,
+      tournament_id: tournamentId,
+      group_number: groupNumber
+    });
+
+    groupRoster.forEach((playerId, seat) => {
+      groupPlayers.push({
+        id: idFactory(),
+        group_id: groupId,
+        player_id: playerId,
+        seat
+      });
+    });
+
+    GROUP_MATCH_LAYOUTS.forEach((layout, roundOrder) => {
+      matches.push({
+        id: idFactory(),
+        tournament_id: tournamentId,
+        group_id: groupId,
+        stage: "group",
+        round_order: roundOrder + 1,
+        court_name: `Court ${groupNumber}`,
+        scheduled_label: layout.label,
+        team_a_player_ids: layout.teamA.map((seat) => groupRoster[seat]),
+        team_b_player_ids: layout.teamB.map((seat) => groupRoster[seat]),
+        team_a_score: 0,
+        team_b_score: 0,
+        is_live: false,
+        is_complete: false
+      });
+    });
+  }
+
+  return { groups, groupPlayers, matches };
+}
+
+export function calculateLeaderboard(players: Player[], matches: Match[]) {
+  const playerMap = new Map(players.map((player) => [player.id, player]));
+  const groupMatches = matches.filter((match) => match.stage === "group" && match.is_complete);
+  const totals = new Map<
+    string,
+    {
+      pointsFor: number;
+      pointsAgainst: number;
+      matchesPlayed: number;
+      wins: number;
+    }
+  >();
+
+  players.forEach((player) => {
+    totals.set(player.id, {
+      pointsFor: 0,
+      pointsAgainst: 0,
+      matchesPlayed: 0,
+      wins: 0
+    });
+  });
+
+  for (const match of groupMatches) {
+    const winnerKey = match.team_a_score === match.team_b_score ? null : match.team_a_score > match.team_b_score ? "a" : "b";
+
+    match.team_a_player_ids.forEach((playerId) => {
+      const bucket = totals.get(playerId);
+
+      if (!bucket) {
+        return;
+      }
+
+      bucket.pointsFor += match.team_a_score;
+      bucket.pointsAgainst += match.team_b_score;
+      bucket.matchesPlayed += 1;
+
+      if (winnerKey === "a") {
+        bucket.wins += 1;
+      }
+    });
+
+    match.team_b_player_ids.forEach((playerId) => {
+      const bucket = totals.get(playerId);
+
+      if (!bucket) {
+        return;
+      }
+
+      bucket.pointsFor += match.team_b_score;
+      bucket.pointsAgainst += match.team_a_score;
+      bucket.matchesPlayed += 1;
+
+      if (winnerKey === "b") {
+        bucket.wins += 1;
+      }
+    });
+  }
+
+  return [...totals.entries()]
+    .map(([playerId, total]) => {
+      const player = playerMap.get(playerId);
+
+      if (!player) {
+        return null;
+      }
+
+      return {
+        player,
+        rank: 0,
+        pointsFor: total.pointsFor,
+        pointsAgainst: total.pointsAgainst,
+        differential: total.pointsFor - total.pointsAgainst,
+        matchesPlayed: total.matchesPlayed,
+        wins: total.wins
+      } satisfies LeaderboardRow;
+    })
+    .filter((row): row is LeaderboardRow => Boolean(row))
+    .sort((left, right) => {
+      if (right.pointsFor !== left.pointsFor) {
+        return right.pointsFor - left.pointsFor;
+      }
+
+      if (right.differential !== left.differential) {
+        return right.differential - left.differential;
+      }
+
+      return left.player.name.localeCompare(right.player.name);
+    })
+    .map((row, index) => ({
+      ...row,
+      rank: index + 1
+    }));
+}
+
+export function buildKnockoutMatches(tournamentId: string, playerIds: string[], stage: Extract<Stage, "quarterfinal" | "semifinal">) {
+  const expectedPlayers = stage === "quarterfinal" ? 16 : 8;
+
+  if (playerIds.length !== expectedPlayers) {
+    throw new Error(`${stage} requires exactly ${expectedPlayers} players.`);
+  }
+
+  const shuffled = shuffle(playerIds);
+  const teams: string[][] = [];
+
+  for (let index = 0; index < shuffled.length; index += 2) {
+    teams.push(shuffled.slice(index, index + 2));
+  }
+
+  const matches: Match[] = [];
+
+  for (let index = 0; index < teams.length; index += 2) {
+    matches.push({
+      id: crypto.randomUUID(),
+      tournament_id: tournamentId,
+      group_id: null,
+      stage,
+      round_order: index / 2 + 1,
+      court_name: null,
+      scheduled_label: stage === "quarterfinal" ? `Quarter Final ${index / 2 + 1}` : `Semi Final ${index / 2 + 1}`,
+      team_a_player_ids: teams[index],
+      team_b_player_ids: teams[index + 1],
+      team_a_score: 0,
+      team_b_score: 0,
+      is_live: false,
+      is_complete: false
+    });
+  }
+
+  return matches;
+}
+
+export function buildFinalStageMatches(tournamentId: string, semifinalMatches: Match[]) {
+  const winners: string[] = [];
+  const losers: string[] = [];
+
+  semifinalMatches.forEach((match) => {
+    if (!match.is_complete) {
+      throw new Error("All semifinal matches must be complete first.");
+    }
+
+    if (match.team_a_score === match.team_b_score) {
+      throw new Error("Semifinal matches cannot end in a tie.");
+    }
+
+    const winnerIds = match.team_a_score > match.team_b_score ? match.team_a_player_ids : match.team_b_player_ids;
+    const loserIds = match.team_a_score > match.team_b_score ? match.team_b_player_ids : match.team_a_player_ids;
+
+    winners.push(...winnerIds);
+    losers.push(...loserIds);
+  });
+
+  const randomizedWinners = shuffle(winners);
+  const randomizedLosers = shuffle(losers);
+
+  return [
+    {
+      id: crypto.randomUUID(),
+      tournament_id: tournamentId,
+      group_id: null,
+      stage: "final" as const,
+      round_order: 1,
+      court_name: null,
+      scheduled_label: "Final",
+      team_a_player_ids: randomizedWinners.slice(0, 2),
+      team_b_player_ids: randomizedWinners.slice(2, 4),
+      team_a_score: 0,
+      team_b_score: 0,
+      is_live: false,
+      is_complete: false
+    },
+    {
+      id: crypto.randomUUID(),
+      tournament_id: tournamentId,
+      group_id: null,
+      stage: "third_place" as const,
+      round_order: 1,
+      court_name: null,
+      scheduled_label: "Third Place",
+      team_a_player_ids: randomizedLosers.slice(0, 2),
+      team_b_player_ids: randomizedLosers.slice(2, 4),
+      team_a_score: 0,
+      team_b_score: 0,
+      is_live: false,
+      is_complete: false
+    }
+  ];
+}
+
+export function groupPlayersByGroup(groups: Group[], groupPlayers: GroupPlayer[], players: Player[]) {
+  const playerMap = new Map(players.map((player) => [player.id, player]));
+
+  return groups
+    .slice()
+    .sort((left, right) => left.group_number - right.group_number)
+    .map((group) => ({
+      group,
+      roster: groupPlayers
+        .filter((item) => item.group_id === group.id)
+        .sort((left, right) => left.seat - right.seat)
+        .map((item) => playerMap.get(item.player_id))
+        .filter((player): player is Player => Boolean(player))
+    }));
+}
+
+export function matchesByStage(matches: Match[]) {
+  const order: Stage[] = ["quarterfinal", "semifinal", "third_place", "final"];
+
+  return order.map((stage) => ({
+    stage,
+    matches: matches
+      .filter((match) => match.stage === stage)
+      .sort((left, right) => left.round_order - right.round_order)
+  }));
+}
+
+export function collectAdvancingPlayers(matches: Match[]) {
+  return matches.flatMap((match) => {
+    if (!match.is_complete || match.team_a_score === match.team_b_score) {
+      return [];
+    }
+
+    return match.team_a_score > match.team_b_score ? match.team_a_player_ids : match.team_b_player_ids;
+  });
+}
+
+export function formatTeam(playerIds: string[], players: Player[]) {
+  const playerMap = new Map(players.map((player) => [player.id, player.name]));
+  return playerIds.map((playerId) => playerMap.get(playerId) ?? "Unknown").join(" / ");
+}
