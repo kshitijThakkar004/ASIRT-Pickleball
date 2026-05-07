@@ -36,6 +36,48 @@ function stageLabel(stage: Match["stage"]) {
   }
 }
 
+function getErrorParts(actionError: unknown) {
+  if (actionError instanceof Error) {
+    return {
+      message: actionError.message,
+      code: ""
+    };
+  }
+
+  if (actionError && typeof actionError === "object") {
+    const candidate = actionError as {
+      message?: unknown;
+      code?: unknown;
+      details?: unknown;
+      hint?: unknown;
+      error_description?: unknown;
+      msg?: unknown;
+    };
+
+    const message =
+      typeof candidate.message === "string"
+        ? candidate.message
+        : typeof candidate.error_description === "string"
+          ? candidate.error_description
+          : typeof candidate.msg === "string"
+            ? candidate.msg
+            : "";
+    const details = typeof candidate.details === "string" ? candidate.details : "";
+    const hint = typeof candidate.hint === "string" ? candidate.hint : "";
+    const code = typeof candidate.code === "string" ? candidate.code : "";
+
+    return {
+      message: [message, details, hint].filter(Boolean).join(" ").trim(),
+      code
+    };
+  }
+
+  return {
+    message: "",
+    code: ""
+  };
+}
+
 export function AdminConsole() {
   const { tournament, players, groups, groupPlayers, matches, loading, error, isDemo, refresh } = useTournamentData({
     startWithDemo: false
@@ -113,23 +155,51 @@ export function AdminConsole() {
   }, [sessionEmail]);
 
   function formatActionError(actionError: unknown) {
-    if (!(actionError instanceof Error)) {
-      return "Something went wrong.";
-    }
+    const { message: rawMessage, code } = getErrorParts(actionError);
+    const message = rawMessage.toLowerCase();
 
-    const message = actionError.message.toLowerCase();
+    if (!rawMessage) {
+      return "Something went wrong. Check that Email auth is enabled in Supabase and that your admin email is allowed.";
+    }
 
     if (
       message.includes("row-level security") ||
       message.includes("permission denied") ||
-      message.includes("violates row-level security policy")
+      message.includes("violates row-level security policy") ||
+      code === "42501"
     ) {
       return sessionEmail
         ? `${sessionEmail} is signed in, but it is not allowed to edit this tournament yet. Add this email to public.admin_users in Supabase, then refresh the page.`
         : "This action needs an organizer account that is listed in public.admin_users.";
     }
 
-    return actionError.message;
+    if (message.includes("stack depth limit exceeded") || code === "54001") {
+      return "Your Supabase admin check is using the older recursive policy setup. Re-run the updated schema.sql in Supabase, then refresh this page.";
+    }
+
+    if (message.includes("email not confirmed")) {
+      return "Supabase rejected the sign-in because Email auth is not fully configured yet.";
+    }
+
+    if (message.includes("smtp") || message.includes("email provider")) {
+      return "Supabase could not send the magic link email. Check that Email auth is enabled in Supabase.";
+    }
+
+    if (message.includes("redirect") || message.includes("redirect_to")) {
+      return "The auth redirect URL is not accepted by Supabase. Add your `/admin` URL under Authentication > URL Configuration.";
+    }
+
+    if (message.includes("duplicate key value") || code === "23505") {
+      if (message.includes("slug")) {
+        return "This tournament already exists. Use the reset controls if you want to recreate it.";
+      }
+
+      if (message.includes("name")) {
+        return "That player name already exists in the roster.";
+      }
+    }
+
+    return rawMessage;
   }
 
   async function runAction(key: string, action: () => Promise<void>) {
@@ -141,6 +211,7 @@ export function AdminConsole() {
       await action();
       await refresh();
     } catch (actionError) {
+      console.error("Admin action failed", actionError);
       setErrorMessage(formatActionError(actionError));
     } finally {
       setBusyKey(null);
