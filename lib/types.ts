@@ -1,4 +1,5 @@
 export type Stage = "group" | "quarterfinal" | "semifinal" | "final" | "third_place";
+export type MatchKind = "scheduled" | "manual";
 
 export type TournamentStatus = "setup" | "group" | "knockout" | "completed";
 
@@ -14,6 +15,7 @@ export interface Tournament {
   slug: string;
   name: string;
   status: TournamentStatus;
+  court_count: number;
   created_at?: string;
 }
 
@@ -34,6 +36,7 @@ export interface Match {
   id: string;
   tournament_id: string;
   group_id: string | null;
+  match_kind: MatchKind;
   stage: Stage;
   round_order: number;
   court_name: string | null;

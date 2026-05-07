@@ -32,6 +32,7 @@ export function shuffle<T>(values: T[]) {
 interface BuildGroupStageAssetsOptions {
   idFactory?: () => string;
   randomize?: boolean;
+  courtCount?: number;
 }
 
 export function buildGroupStageAssets(
@@ -44,10 +45,12 @@ export function buildGroupStageAssets(
   }
 
   const idFactory = options.idFactory ?? (() => crypto.randomUUID());
+  const courtCount = Math.max(1, options.courtCount ?? 1);
   const shuffledPlayerIds = options.randomize === false ? [...playerIds] : shuffle(playerIds);
   const groups: Group[] = [];
   const groupPlayers: GroupPlayer[] = [];
   const matches: Match[] = [];
+  let scheduledMatchIndex = 0;
 
   for (let index = 0; index < shuffledPlayerIds.length; index += 4) {
     const groupNumber = index / 4 + 1;
@@ -74,9 +77,10 @@ export function buildGroupStageAssets(
         id: idFactory(),
         tournament_id: tournamentId,
         group_id: groupId,
+        match_kind: "scheduled",
         stage: "group",
         round_order: roundOrder + 1,
-        court_name: `Court ${groupNumber}`,
+        court_name: `Court ${(scheduledMatchIndex % courtCount) + 1}`,
         scheduled_label: layout.label,
         team_a_player_ids: layout.teamA.map((seat) => groupRoster[seat]),
         team_b_player_ids: layout.teamB.map((seat) => groupRoster[seat]),
@@ -85,6 +89,7 @@ export function buildGroupStageAssets(
         is_live: false,
         is_complete: false
       });
+      scheduledMatchIndex += 1;
     });
   }
 
@@ -93,7 +98,9 @@ export function buildGroupStageAssets(
 
 export function calculateLeaderboard(players: Player[], matches: Match[]) {
   const playerMap = new Map(players.map((player) => [player.id, player]));
-  const groupMatches = matches.filter((match) => match.stage === "group" && match.is_complete);
+  const groupMatches = matches.filter(
+    (match) => match.match_kind === "scheduled" && match.stage === "group" && match.is_complete
+  );
   const totals = new Map<
     string,
     {
@@ -206,6 +213,7 @@ export function buildKnockoutMatches(tournamentId: string, playerIds: string[], 
       id: crypto.randomUUID(),
       tournament_id: tournamentId,
       group_id: null,
+      match_kind: "scheduled",
       stage,
       round_order: index / 2 + 1,
       court_name: null,
@@ -250,6 +258,7 @@ export function buildFinalStageMatches(tournamentId: string, semifinalMatches: M
       id: crypto.randomUUID(),
       tournament_id: tournamentId,
       group_id: null,
+      match_kind: "scheduled",
       stage: "final" as const,
       round_order: 1,
       court_name: null,
@@ -265,6 +274,7 @@ export function buildFinalStageMatches(tournamentId: string, semifinalMatches: M
       id: crypto.randomUUID(),
       tournament_id: tournamentId,
       group_id: null,
+      match_kind: "scheduled",
       stage: "third_place" as const,
       round_order: 1,
       court_name: null,
@@ -301,7 +311,7 @@ export function matchesByStage(matches: Match[]) {
   return order.map((stage) => ({
     stage,
     matches: matches
-      .filter((match) => match.stage === stage)
+      .filter((match) => match.match_kind === "scheduled" && match.stage === stage)
       .sort((left, right) => left.round_order - right.round_order)
   }));
 }
@@ -319,4 +329,50 @@ export function collectAdvancingPlayers(matches: Match[]) {
 export function formatTeam(playerIds: string[], players: Player[]) {
   const playerMap = new Map(players.map((player) => [player.id, player.name]));
   return playerIds.map((playerId) => playerMap.get(playerId) ?? "Unknown").join(" / ");
+}
+
+function extractCourtNumber(courtName: string | null) {
+  if (!courtName) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const match = courtName.match(/(\d+)/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+export function sortMatchesForAdmin(matches: Match[]) {
+  const stageOrder: Record<Stage, number> = {
+    group: 0,
+    quarterfinal: 1,
+    semifinal: 2,
+    third_place: 3,
+    final: 4
+  };
+
+  return matches.slice().sort((left, right) => {
+    if (left.is_complete !== right.is_complete) {
+      return left.is_complete ? 1 : -1;
+    }
+
+    if (left.is_live !== right.is_live) {
+      return left.is_live ? -1 : 1;
+    }
+
+    const leftCourt = extractCourtNumber(left.court_name);
+    const rightCourt = extractCourtNumber(right.court_name);
+
+    if (leftCourt !== rightCourt) {
+      return leftCourt - rightCourt;
+    }
+
+    if (left.match_kind !== right.match_kind) {
+      return left.match_kind === "scheduled" ? -1 : 1;
+    }
+
+    if (stageOrder[left.stage] !== stageOrder[right.stage]) {
+      return stageOrder[left.stage] - stageOrder[right.stage];
+    }
+
+    return left.round_order - right.round_order;
+  });
 }

@@ -112,7 +112,8 @@ export function createDemoState(): TournamentState {
       id: tournamentId,
       slug: "asirt-pickleball-open",
       name: "Asirt Pickleball Open",
-      status: "group"
+      status: "group",
+      court_count: 2
     },
     players,
     groups,

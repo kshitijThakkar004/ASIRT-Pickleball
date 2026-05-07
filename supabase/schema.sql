@@ -5,8 +5,12 @@ create table if not exists public.tournaments (
   slug text not null unique,
   name text not null,
   status text not null default 'setup' check (status in ('setup', 'group', 'knockout', 'completed')),
+  court_count integer not null default 1 check (court_count >= 1 and court_count <= 32),
   created_at timestamptz not null default now()
 );
+
+alter table public.tournaments
+add column if not exists court_count integer not null default 1;
 
 create table if not exists public.players (
   id uuid primary key default gen_random_uuid(),
@@ -36,6 +40,7 @@ create table if not exists public.matches (
   id uuid primary key default gen_random_uuid(),
   tournament_id uuid not null references public.tournaments(id) on delete cascade,
   group_id uuid references public.groups(id) on delete cascade,
+  match_kind text not null default 'scheduled' check (match_kind in ('scheduled', 'manual')),
   stage text not null check (stage in ('group', 'quarterfinal', 'semifinal', 'final', 'third_place')),
   round_order integer not null default 1,
   court_name text,
@@ -48,6 +53,15 @@ create table if not exists public.matches (
   is_complete boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+alter table public.matches
+add column if not exists match_kind text not null default 'scheduled';
+
+alter table public.matches
+drop constraint if exists matches_match_kind_check;
+
+alter table public.matches
+add constraint matches_match_kind_check check (match_kind in ('scheduled', 'manual'));
 
 create table if not exists public.admin_users (
   email text primary key,

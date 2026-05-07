@@ -30,7 +30,7 @@ function playerMark(player: Player) {
 
 function groupMatches(matches: Match[], groupId: string) {
   return matches
-    .filter((match) => match.group_id === groupId)
+    .filter((match) => match.match_kind === "scheduled" && match.group_id === groupId)
     .sort((left, right) => left.round_order - right.round_order);
 }
 
@@ -42,7 +42,9 @@ export function TournamentApp() {
   const leaderboard = calculateLeaderboard(players.filter((player) => player.is_active), matches);
   const groupedPlayers = groupPlayersByGroup(groups, groupPlayers, players);
   const liveMatches = matches.filter((match) => match.is_live && !match.is_complete);
-  const completedGroupMatches = matches.filter((match) => match.stage === "group" && match.is_complete).length;
+  const completedGroupMatches = matches.filter(
+    (match) => match.match_kind === "scheduled" && match.stage === "group" && match.is_complete
+  ).length;
   const stagedKnockout = matchesByStage(matches).filter((entry) => entry.matches.length > 0);
   const visibleGroups = useMemo(
     () =>
@@ -147,7 +149,13 @@ export function TournamentApp() {
                 <article className="live-match-card" key={match.id}>
                   <div className="live-match-meta">
                     <span>{match.court_name ?? match.scheduled_label ?? "Court pending"}</span>
-                    <span>{match.stage === "group" ? "Group Stage" : STAGE_LABELS[match.stage]}</span>
+                    <span>
+                      {match.match_kind === "manual"
+                        ? "Manual Match"
+                        : match.stage === "group"
+                          ? "Group Stage"
+                          : STAGE_LABELS[match.stage]}
+                    </span>
                   </div>
                   <div className="live-score-row">
                     <span>{formatTeam(match.team_a_player_ids, players)}</span>
