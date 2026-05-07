@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ChevronLeft, LogOut, Shuffle, TimerReset } from "lucide-react";
+import { ChevronLeft, LogOut, Shuffle, TimerReset } from "lucide-react";
 import { createSeedPlayers } from "@/lib/seed";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import {
@@ -117,6 +117,11 @@ export function AdminConsole() {
   const sortedScheduledMatches = useMemo(() => sortMatchesForAdmin(scheduledMatches), [scheduledMatches]);
   const sortedManualMatches = useMemo(() => sortMatchesForAdmin(manualMatches), [manualMatches]);
   const liveScheduledMatches = scheduledMatches.filter((match) => match.is_live && !match.is_complete).length;
+  const quarterfinalCount = scheduledMatches.filter((match) => match.stage === "quarterfinal").length;
+  const semifinalCount = scheduledMatches.filter((match) => match.stage === "semifinal").length;
+  const finalStageCount = scheduledMatches.filter(
+    (match) => match.stage === "final" || match.stage === "third_place"
+  ).length;
 
   const visibleScheduledMatches = useMemo(
     () =>
@@ -330,7 +335,7 @@ export function AdminConsole() {
     });
   }
 
-  async function sendMagicLink(event: FormEvent<HTMLFormElement>) {
+  async function sendVerificationLink(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     await runAction("magic-link", async () => {
@@ -347,7 +352,7 @@ export function AdminConsole() {
         throw authError;
       }
 
-      setStatusMessage(`A sign-in link has been sent to ${loginEmail}.`);
+      setStatusMessage(`A verification link has been sent to ${loginEmail}.`);
       setLoginEmail("");
     });
   }
@@ -816,24 +821,80 @@ export function AdminConsole() {
     });
   }
 
-  async function deleteManualMatch(matchId: string) {
-    if (!window.confirm("Delete this manual match?")) {
+  async function deleteMatch(match: Match) {
+    const label = match.scheduled_label ?? `Match ${match.round_order}`;
+    const matchKindLabel = match.match_kind === "manual" ? "manual match" : "scheduled match";
+
+    if (!window.confirm(`Delete ${label}? This ${matchKindLabel} will be removed from the event.`)) {
       return;
     }
 
-    await runAction(`delete-match-${matchId}`, async () => {
+    await runAction(`delete-match-${match.id}`, async () => {
       const supabase = await requireSupabase();
       const { error: deleteError } = await supabase
         .from("matches")
         .delete()
-        .eq("id", matchId)
-        .eq("match_kind", "manual");
+        .eq("id", match.id)
+        .eq("match_kind", match.match_kind);
 
       if (deleteError) {
         throw deleteError;
       }
 
-      setStatusMessage("Manual match deleted.");
+      setStatusMessage(`${label} deleted.`);
+    });
+  }
+
+  async function deleteScheduledStage(stage: "quarterfinal" | "semifinal" | "final") {
+    if (!tournament) {
+      setErrorMessage("Create the tournament first.");
+      return;
+    }
+
+    const stageMap = {
+      quarterfinal: ["quarterfinal", "semifinal", "final", "third_place"],
+      semifinal: ["semifinal", "final", "third_place"],
+      final: ["final", "third_place"]
+    } as const;
+    const labelMap = {
+      quarterfinal: "quarterfinals",
+      semifinal: "semifinals",
+      final: "final stage"
+    } as const;
+    const nextStatus: TournamentStatus = stage === "quarterfinal" ? "group" : "knockout";
+
+    if (
+      !window.confirm(
+        `Delete the ${labelMap[stage]} and any rounds that come after them? This only removes scheduled tournament matches.`
+      )
+    ) {
+      return;
+    }
+
+    await runAction(`delete-stage-${stage}`, async () => {
+      const supabase = await requireSupabase();
+      const stagesToDelete = [...stageMap[stage]];
+      const { error: deleteError } = await supabase
+        .from("matches")
+        .delete()
+        .eq("tournament_id", tournament.id)
+        .eq("match_kind", "scheduled")
+        .in("stage", stagesToDelete);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      const { error: updateError } = await supabase
+        .from("tournaments")
+        .update({ status: nextStatus })
+        .eq("id", tournament.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      setStatusMessage(`Scheduled ${labelMap[stage]} removed.`);
     });
   }
 
@@ -935,6 +996,36 @@ export function AdminConsole() {
                 <strong>{rankedLeaderboard.length >= 16 ? "Top 16 ready" : `${rankedLeaderboard.length}/16 ranked`}</strong>
               </div>
             </div>
+            <div className="nested-admin-card">
+              <h3>Bracket Cleanup</h3>
+              <p>Remove a generated round if it was created by mistake. Deleting a round also removes any later scheduled rounds.</p>
+              <div className="admin-toolbar">
+                <button
+                  className="button button-secondary"
+                  disabled={!canEdit || quarterfinalCount === 0 || busyKey === "delete-stage-quarterfinal"}
+                  onClick={() => void deleteScheduledStage("quarterfinal")}
+                  type="button"
+                >
+                  Delete quarterfinals
+                </button>
+                <button
+                  className="button button-secondary"
+                  disabled={!canEdit || semifinalCount === 0 || busyKey === "delete-stage-semifinal"}
+                  onClick={() => void deleteScheduledStage("semifinal")}
+                  type="button"
+                >
+                  Delete semifinals
+                </button>
+                <button
+                  className="button button-secondary"
+                  disabled={!canEdit || finalStageCount === 0 || busyKey === "delete-stage-final"}
+                  onClick={() => void deleteScheduledStage("final")}
+                  type="button"
+                >
+                  Delete final stage
+                </button>
+              </div>
+            </div>
           </section>
         );
       case "roster":
@@ -1007,9 +1098,10 @@ export function AdminConsole() {
                 visibleScheduledMatches.map((match) => (
                   <MatchEditor
                     key={match.id}
-                    busy={!canEdit || busyKey === `match-${match.id}`}
+                    busy={!canEdit || busyKey === `match-${match.id}` || busyKey === `delete-match-${match.id}`}
                     match={match}
                     players={players}
+                    onDelete={() => void deleteMatch(match)}
                     onSave={(nextMatch) => void saveMatch(nextMatch)}
                   />
                 ))
@@ -1131,7 +1223,7 @@ export function AdminConsole() {
                     busy={!canEdit || busyKey === `match-${match.id}` || busyKey === `delete-match-${match.id}`}
                     match={match}
                     players={players}
-                    onDelete={() => void deleteManualMatch(match.id)}
+                    onDelete={() => void deleteMatch(match)}
                     onSave={(nextMatch) => void saveMatch(nextMatch)}
                   />
                 ))
@@ -1208,10 +1300,7 @@ export function AdminConsole() {
               <LogOut size={18} />
             </button>
           ) : (
-            <span className="live-count" aria-label="Supabase status">
-              <CheckCircle2 size={13} />
-              <span>{supabaseConfigured ? "On" : "Off"}</span>
-            </span>
+            <span className="topbar-spacer" aria-hidden="true" />
           )}
         </header>
 
@@ -1224,10 +1313,6 @@ export function AdminConsole() {
             </p>
           </div>
           <div className="admin-status-strip">
-            <span className="badge">
-              <CheckCircle2 size={14} />
-              {supabaseConfigured ? "Supabase connected" : "Awaiting Supabase setup"}
-            </span>
             <Link className="badge" href="/">
               Public board
             </Link>
@@ -1250,7 +1335,7 @@ export function AdminConsole() {
           ) : null}
 
           {!supabaseConfigured ? null : !sessionEmail ? (
-            <form className="login-panel" onSubmit={(event) => void sendMagicLink(event)}>
+            <form className="login-panel" onSubmit={(event) => void sendVerificationLink(event)}>
               <div className="field">
                 <label htmlFor="loginEmail">Organizer email</label>
                 <input
@@ -1264,7 +1349,7 @@ export function AdminConsole() {
               </div>
               <div className="button-row button-row-end">
                 <button className="button button-primary" disabled={busyKey === "magic-link"} type="submit">
-                  Send sign-in link
+                  Send verification link
                 </button>
               </div>
             </form>

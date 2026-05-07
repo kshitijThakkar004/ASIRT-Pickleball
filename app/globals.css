@@ -31,9 +31,9 @@ body {
   min-width: 320px;
   color: var(--foreground);
   background:
-    radial-gradient(circle at top left, rgba(199, 156, 77, 0.18), transparent 28%),
-    radial-gradient(circle at top right, rgba(25, 73, 60, 0.16), transparent 22%),
-    linear-gradient(180deg, #f8f5ee 0%, #f4efe2 40%, #f3ede0 100%);
+    radial-gradient(circle at top left, rgba(79, 99, 190, 0.24), transparent 24%),
+    radial-gradient(circle at top right, rgba(35, 72, 126, 0.2), transparent 24%),
+    linear-gradient(180deg, #13194a 0%, #0f143c 48%, #0b1031 100%);
   font-family: var(--font-sans);
 }
 
@@ -350,6 +350,11 @@ button {
 
 .admin-console .icon-button {
   border: 0;
+}
+
+.topbar-spacer {
+  width: 38px;
+  height: 38px;
 }
 
 .admin-hero,
