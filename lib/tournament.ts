@@ -20,6 +20,102 @@ export function shuffle<T>(values: T[]) {
   return copy;
 }
 
+const STAGE_DISPLAY_ORDER: Stage[] = ["group", "quarterfinal", "semifinal", "third_place", "final"];
+const KNOCKOUT_STAGE_ORDER: Stage[] = ["quarterfinal", "semifinal", "third_place", "final"];
+const HISTORY_STAGE_ORDER: Stage[] = ["final", "third_place", "semifinal", "quarterfinal", "group"];
+
+function buildStageOrderMap(order: Stage[]) {
+  return new Map(order.map((stage, index) => [stage, index]));
+}
+
+const stageDisplayRank = buildStageOrderMap(STAGE_DISPLAY_ORDER);
+const historyStageRank = buildStageOrderMap(HISTORY_STAGE_ORDER);
+
+export function getStageLabel(stage: Stage) {
+  switch (stage) {
+    case "group":
+      return "Group Stage";
+    case "quarterfinal":
+      return "Quarter Finals";
+    case "semifinal":
+      return "Semi Finals";
+    case "third_place":
+      return "Third Place";
+    case "final":
+      return "Final";
+    default:
+      return stage;
+  }
+}
+
+export function getMatchWinnerKey(match: Match) {
+  if (!match.is_complete || match.team_a_score === match.team_b_score) {
+    return null;
+  }
+
+  return match.team_a_score > match.team_b_score ? "a" : "b";
+}
+
+function sortMatchesByDisplay(left: Match, right: Match) {
+  const leftStage = stageDisplayRank.get(left.stage) ?? 0;
+  const rightStage = stageDisplayRank.get(right.stage) ?? 0;
+
+  if (left.is_live !== right.is_live) {
+    return left.is_live ? -1 : 1;
+  }
+
+  if (leftStage !== rightStage) {
+    return leftStage - rightStage;
+  }
+
+  const leftCourt = extractCourtNumber(left.court_name);
+  const rightCourt = extractCourtNumber(right.court_name);
+
+  if (leftCourt !== rightCourt) {
+    return leftCourt - rightCourt;
+  }
+
+  return left.round_order - right.round_order;
+}
+
+export function getLiveMatches(matches: Match[]) {
+  return matches.filter((match) => match.is_live && !match.is_complete).sort(sortMatchesByDisplay);
+}
+
+export function getUpcomingMatches(matches: Match[]) {
+  return matches.filter((match) => !match.is_complete).sort(sortMatchesByDisplay);
+}
+
+export function getCompletedMatches(matches: Match[]) {
+  return matches.slice().filter((match) => match.is_complete).sort((left, right) => {
+    const leftStage = historyStageRank.get(left.stage) ?? Number.MAX_SAFE_INTEGER;
+    const rightStage = historyStageRank.get(right.stage) ?? Number.MAX_SAFE_INTEGER;
+
+    if (left.match_kind !== right.match_kind) {
+      return left.match_kind === "scheduled" ? -1 : 1;
+    }
+
+    if (leftStage !== rightStage) {
+      return leftStage - rightStage;
+    }
+
+    if (left.round_order !== right.round_order) {
+      return right.round_order - left.round_order;
+    }
+
+    return extractCourtNumber(left.court_name) - extractCourtNumber(right.court_name);
+  });
+}
+
+export function getKnockoutMatchesByStage(matches: Match[]) {
+  return KNOCKOUT_STAGE_ORDER.map((stage) => ({
+    stage,
+    matches: matches
+      .filter((match) => match.match_kind === "scheduled" && match.stage === stage)
+      .sort((left, right) => left.round_order - right.round_order)
+  }));
+}
+
 interface BuildGroupStageAssetsOptions {
   idFactory?: () => string;
   randomize?: boolean;
@@ -374,14 +470,7 @@ export function groupPlayersByGroup(groups: Group[], groupPlayers: GroupPlayer[]
 }
 
 export function matchesByStage(matches: Match[]) {
-  const order: Stage[] = ["quarterfinal", "semifinal", "third_place", "final"];
-
-  return order.map((stage) => ({
-    stage,
-    matches: matches
-      .filter((match) => match.match_kind === "scheduled" && match.stage === stage)
-      .sort((left, right) => left.round_order - right.round_order)
-  }));
+  return getKnockoutMatchesByStage(matches);
 }
 
 export function collectAdvancingPlayers(matches: Match[]) {
