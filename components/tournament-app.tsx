@@ -28,9 +28,16 @@ function playerMark(player: Player) {
     .toUpperCase();
 }
 
-function groupMatches(matches: Match[], groupId: string) {
+function groupMatches(matches: Match[], rosterIds: string[]) {
+  const rosterIdSet = new Set(rosterIds);
+
   return matches
-    .filter((match) => match.match_kind === "scheduled" && match.group_id === groupId)
+    .filter(
+      (match) =>
+        match.match_kind === "scheduled" &&
+        match.stage === "group" &&
+        [...match.team_a_player_ids, ...match.team_b_player_ids].some((playerId) => rosterIdSet.has(playerId))
+    )
     .sort((left, right) => left.round_order - right.round_order);
 }
 
@@ -97,7 +104,10 @@ export function TournamentApp() {
             <div className="standings-empty">Groups will appear once the active roster is randomized.</div>
           ) : null}
           {visibleGroups.map(({ group, roster }) => {
-            const matchesForGroup = groupMatches(matches, group.id);
+            const matchesForGroup = groupMatches(
+              matches,
+              roster.map((player) => player.id)
+            );
             const completedMatches = matchesForGroup.filter((match) => match.is_complete).length;
             const rows = calculateLeaderboard(roster, matchesForGroup);
 
@@ -106,7 +116,7 @@ export function TournamentApp() {
                 <div className="standings-group-header">
                   <h2>{groupLabel(group.group_number)}</h2>
                   <span>
-                    {completedMatches}/{matchesForGroup.length} matches played
+                    {completedMatches}/{matchesForGroup.length} pairings played
                   </span>
                 </div>
                 <div className="standings-card">

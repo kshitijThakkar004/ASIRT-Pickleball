@@ -85,7 +85,8 @@ Vercel free tier and Supabase free tier are both good enough for this tournament
 ## Tournament logic
 
 - Group stage uses groups of 4 players.
-- Each group plays 3 matches so everyone partners with everyone else once.
+- Each player gets 3 group-stage matches, partnering each of their 3 group-mates once.
+- Opponent teams are drawn from the wider tournament pool instead of staying inside the same group.
 - Match scores are entered as team totals to 15.
 - Each player receives the exact score their team earned.
 - Top 16 qualify by total points.

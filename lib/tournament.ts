@@ -1,21 +1,12 @@
 import { Group, GroupPlayer, LeaderboardRow, Match, Player, Stage } from "@/lib/types";
 
-const GROUP_MATCH_LAYOUTS = [
-  {
-    label: "Rotation 1",
-    teamA: [0, 1],
-    teamB: [2, 3]
-  },
-  {
-    label: "Rotation 2",
-    teamA: [0, 2],
-    teamB: [1, 3]
-  },
-  {
-    label: "Rotation 3",
-    teamA: [0, 3],
-    teamB: [1, 2]
-  }
+const GROUP_PAIR_LAYOUTS = [
+  { label: "Pairing 1", team: [0, 1] },
+  { label: "Pairing 2", team: [0, 2] },
+  { label: "Pairing 3", team: [0, 3] },
+  { label: "Pairing 4", team: [1, 2] },
+  { label: "Pairing 5", team: [1, 3] },
+  { label: "Pairing 6", team: [2, 3] }
 ] as const;
 
 export function shuffle<T>(values: T[]) {
@@ -44,12 +35,25 @@ export function buildGroupStageAssets(
     throw new Error("Active players must be divisible into groups of 4.");
   }
 
+  if (playerIds.length < 8) {
+    throw new Error("At least 8 active players are required so group pairings can face teams from the wider pool.");
+  }
+
   const idFactory = options.idFactory ?? (() => crypto.randomUUID());
   const courtCount = Math.max(1, options.courtCount ?? 1);
   const shuffledPlayerIds = options.randomize === false ? [...playerIds] : shuffle(playerIds);
   const groups: Group[] = [];
   const groupPlayers: GroupPlayer[] = [];
   const matches: Match[] = [];
+  const pairingsByGroup = new Map<
+    string,
+    Array<{
+      groupId: string;
+      groupNumber: number;
+      playerIds: string[];
+      label: string;
+    }>
+  >();
   let scheduledMatchIndex = 0;
 
   for (let index = 0; index < shuffledPlayerIds.length; index += 4) {
@@ -72,25 +76,89 @@ export function buildGroupStageAssets(
       });
     });
 
-    GROUP_MATCH_LAYOUTS.forEach((layout, roundOrder) => {
-      matches.push({
-        id: idFactory(),
-        tournament_id: tournamentId,
-        group_id: groupId,
-        match_kind: "scheduled",
-        stage: "group",
-        round_order: roundOrder + 1,
-        court_name: `Court ${(scheduledMatchIndex % courtCount) + 1}`,
-        scheduled_label: layout.label,
-        team_a_player_ids: layout.teamA.map((seat) => groupRoster[seat]),
-        team_b_player_ids: layout.teamB.map((seat) => groupRoster[seat]),
-        team_a_score: 0,
-        team_b_score: 0,
-        is_live: false,
-        is_complete: false
+    const groupPairings = GROUP_PAIR_LAYOUTS.map((layout) => ({
+      groupId,
+      groupNumber,
+      playerIds: layout.team.map((seat) => groupRoster[seat]),
+      label: layout.label
+    }));
+
+    pairingsByGroup.set(groupId, options.randomize === false ? groupPairings : shuffle(groupPairings));
+  }
+
+  const orderedGroups = groups.map((group) => group.id);
+  const sequencingSeed = options.randomize === false ? orderedGroups : shuffle(orderedGroups);
+  const sequencingRank = new Map(sequencingSeed.map((groupId, index) => [groupId, index]));
+  const scheduledPairs: Array<{
+    groupId: string;
+    groupNumber: number;
+    playerIds: string[];
+    label: string;
+  }> = [];
+  let previousGroupId: string | null = null;
+
+  while ([...pairingsByGroup.values()].some((items) => items.length > 0)) {
+    const candidateGroups = sequencingSeed
+      .filter((groupId) => (pairingsByGroup.get(groupId)?.length ?? 0) > 0)
+      .sort((left, right) => {
+        const leftCount = pairingsByGroup.get(left)?.length ?? 0;
+        const rightCount = pairingsByGroup.get(right)?.length ?? 0;
+
+        if (rightCount !== leftCount) {
+          return rightCount - leftCount;
+        }
+
+        return (sequencingRank.get(left) ?? 0) - (sequencingRank.get(right) ?? 0);
       });
-      scheduledMatchIndex += 1;
+
+    const nextGroupId =
+      candidateGroups.find((groupId) => groupId !== previousGroupId) ?? candidateGroups[0] ?? null;
+
+    if (!nextGroupId) {
+      break;
+    }
+
+    const nextPair = pairingsByGroup.get(nextGroupId)?.shift();
+
+    if (!nextPair) {
+      continue;
+    }
+
+    scheduledPairs.push(nextPair);
+    previousGroupId = nextGroupId;
+  }
+
+  for (let index = 0; index < scheduledPairs.length; index += 2) {
+    const teamA = scheduledPairs[index];
+    const teamB = scheduledPairs[index + 1];
+
+    if (!teamA || !teamB) {
+      throw new Error("Could not build a balanced global opponent schedule from the current group pairings.");
+    }
+
+    if (teamA.groupId === teamB.groupId) {
+      throw new Error("Group-stage scheduling produced an invalid same-group opponent matchup. Please try again.");
+    }
+
+    matches.push({
+      id: idFactory(),
+      tournament_id: tournamentId,
+      group_id: null,
+      match_kind: "scheduled",
+      stage: "group",
+      round_order: index / 2 + 1,
+      court_name: `Court ${(scheduledMatchIndex % courtCount) + 1}`,
+      scheduled_label: `Group ${String.fromCharCode(64 + teamA.groupNumber)} ${teamA.label} vs Group ${String.fromCharCode(
+        64 + teamB.groupNumber
+      )} ${teamB.label}`,
+      team_a_player_ids: teamA.playerIds,
+      team_b_player_ids: teamB.playerIds,
+      team_a_score: 0,
+      team_b_score: 0,
+      is_live: false,
+      is_complete: false
     });
+    scheduledMatchIndex += 1;
   }
 
   return { groups, groupPlayers, matches };
