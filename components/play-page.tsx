@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { PublicMatchCard } from "@/components/public-match-card";
 import { PublicShell } from "@/components/public-shell";
 import { useTournamentData } from "@/lib/use-tournament-data";
-import { getLiveMatches, getStageLabel, getUpcomingMatches } from "@/lib/tournament";
+import { getDisplayParticipantIds, getLiveMatches, getStageLabel, getUpcomingMatches } from "@/lib/tournament";
 import { Match, Player } from "@/lib/types";
 
 function getPerspectivePlayerId(match: Match, players: Player[], query: string) {
@@ -14,7 +14,7 @@ function getPerspectivePlayerId(match: Match, players: Player[], query: string) 
     return null;
   }
 
-  return [...match.team_a_player_ids, ...match.team_b_player_ids].find((playerId) =>
+  return getDisplayParticipantIds(match).find((playerId) =>
     (players.find((player) => player.id === playerId)?.name ?? "").toLowerCase().includes(normalizedQuery)
   );
 }

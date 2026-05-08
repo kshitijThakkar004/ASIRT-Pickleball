@@ -11,7 +11,9 @@ import {
   buildKnockoutMatches,
   calculateLeaderboard,
   collectAdvancingPlayers,
-  formatTeam,
+  formatDisplayTeam,
+  getAllMatchParticipantIds,
+  getHelperLabel,
   sortMatchesForAdmin
 } from "@/lib/tournament";
 import { Match, Player, TournamentStatus } from "@/lib/types";
@@ -411,7 +413,7 @@ export function AdminConsole() {
   async function deletePlayer(playerId: string, playerName: string) {
     const playerIsScheduled =
       groupPlayers.some((entry) => entry.player_id === playerId) ||
-      matches.some((match) => match.team_a_player_ids.includes(playerId) || match.team_b_player_ids.includes(playerId));
+      matches.some((match) => getAllMatchParticipantIds(match).includes(playerId));
 
     if (playerIsScheduled) {
       setErrorMessage(`${playerName} is already part of the current event flow. Mark the player inactive instead.`);
@@ -440,8 +442,8 @@ export function AdminConsole() {
       return;
     }
 
-    if (activePlayers.length % 4 !== 0) {
-      setErrorMessage("Active player count must be divisible by 4 before you can generate groups.");
+    if (activePlayers.length < 8) {
+      setErrorMessage("At least 8 active players are needed before you can generate groups.");
       return;
     }
 
@@ -468,7 +470,12 @@ export function AdminConsole() {
         await supabase.from("groups").delete().in("id", groupIds);
       }
 
-      const { groups: nextGroups, groupPlayers: nextGroupPlayers, matches: nextMatches } = buildGroupStageAssets(
+      const {
+        groups: nextGroups,
+        groupPlayers: nextGroupPlayers,
+        matches: nextMatches,
+        standbyPlayerIds
+      } = buildGroupStageAssets(
         tournament.id,
         activePlayers.map((player) => player.id),
         {
@@ -495,6 +502,17 @@ export function AdminConsole() {
       }
 
       await supabase.from("tournaments").update({ status: "group" }).eq("id", tournament.id);
+
+      if (standbyPlayerIds.length > 0) {
+        const helperNames = activePlayers
+          .filter((player) => standbyPlayerIds.includes(player.id))
+          .map((player) => player.name)
+          .join(", ");
+
+        setStatusMessage(`Groups generated. Overflow rotation for this draw: ${helperNames}. Their match points will count, and qualification now uses average points per match.`);
+        return;
+      }
+
       setStatusMessage("Groups and round-robin schedule generated.");
     });
   }
@@ -798,6 +816,8 @@ export function AdminConsole() {
         scheduled_label: manualMatchDraft.scheduledLabel.trim() || `Manual Match ${nextRoundOrder}`,
         team_a_player_ids: [manualMatchDraft.teamAPlayerOne, manualMatchDraft.teamAPlayerTwo],
         team_b_player_ids: [manualMatchDraft.teamBPlayerOne, manualMatchDraft.teamBPlayerTwo],
+        helper_player_ids: [],
+        helper_for_player_ids: [],
         team_a_score: 0,
         team_b_score: 0,
         is_live: false,
@@ -954,6 +974,13 @@ export function AdminConsole() {
               >
                 Generate final stage
               </button>
+            </div>
+            <div className="standings-notice">
+              {activePlayers.length >= 8
+                ? activePlayers.length % 4 === 0
+                  ? "Every active player will be included in the next group draw."
+                  : `${activePlayers.length % 4} overflow player${activePlayers.length % 4 === 1 ? "" : "s"} will be rotated into official matches. Qualification uses average points per match whenever match counts differ.`
+                : "Activate at least 8 players before generating groups."}
             </div>
             <div className="form-grid compact-grid">
               <div className="field">
@@ -1495,9 +1522,10 @@ function MatchEditor({
         <span className="badge">{match.scheduled_label ?? `Match ${match.round_order}`}</span>
       </div>
       <div className="mini-row">
-        <span>{formatTeam(match.team_a_player_ids, players)}</span>
-        <span>{formatTeam(match.team_b_player_ids, players)}</span>
+        <span>{formatDisplayTeam(match, "a", players)}</span>
+        <span>{formatDisplayTeam(match, "b", players)}</span>
       </div>
+      {getHelperLabel(match, players) ? <div className="helper-note">{getHelperLabel(match, players)}</div> : null}
       <div className="form-grid">
         <div className="field">
           <label htmlFor={`court-${match.id}`}>Court label</label>

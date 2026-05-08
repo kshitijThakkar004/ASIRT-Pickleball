@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { PublicMatchCard } from "@/components/public-match-card";
 import { PublicShell } from "@/components/public-shell";
 import { useTournamentData } from "@/lib/use-tournament-data";
-import { getCompletedMatches, getLiveMatches, getStageLabel } from "@/lib/tournament";
+import { getAllMatchParticipantIds, getCompletedMatches, getLiveMatches, getStageLabel } from "@/lib/tournament";
 import { Match, Stage } from "@/lib/types";
 
 type HistoryStageFilter = "all" | Stage | "manual";
@@ -26,7 +26,7 @@ function matchIncludesPlayer(match: Match, playerNames: Map<string, string>, que
     return true;
   }
 
-  return [...match.team_a_player_ids, ...match.team_b_player_ids].some((playerId) =>
+  return getAllMatchParticipantIds(match).some((playerId) =>
     (playerNames.get(playerId) ?? "").toLowerCase().includes(normalizedQuery)
   );
 }

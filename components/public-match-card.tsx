@@ -1,22 +1,25 @@
 "use client";
 
 import { Match, Player } from "@/lib/types";
-import { formatTeam, getMatchWinnerKey } from "@/lib/tournament";
+import { formatDisplayTeam, formatTeam, getDisplayTeamPlayerIds, getHelperLabel, getMatchWinnerKey } from "@/lib/tournament";
 
 function findPerspective(match: Match, playerId: string) {
-  if (match.team_a_player_ids.includes(playerId)) {
+  const teamA = getDisplayTeamPlayerIds(match, "a");
+  const teamB = getDisplayTeamPlayerIds(match, "b");
+
+  if (teamA.includes(playerId)) {
     return {
-      ownTeam: match.team_a_player_ids,
-      opponentTeam: match.team_b_player_ids,
+      ownTeam: teamA,
+      opponentTeam: teamB,
       ownScore: match.team_a_score,
       opponentScore: match.team_b_score
     };
   }
 
-  if (match.team_b_player_ids.includes(playerId)) {
+  if (teamB.includes(playerId)) {
     return {
-      ownTeam: match.team_b_player_ids,
-      opponentTeam: match.team_a_player_ids,
+      ownTeam: teamB,
+      opponentTeam: teamA,
       ownScore: match.team_b_score,
       opponentScore: match.team_a_score
     };
@@ -46,6 +49,7 @@ export function PublicMatchCard({
 }) {
   const perspective = playerId ? findPerspective(match, playerId) : null;
   const winnerKey = getMatchWinnerKey(match);
+  const helperLabel = getHelperLabel(match, players);
 
   return (
     <article className="live-match-card">
@@ -83,24 +87,26 @@ export function PublicMatchCard({
       ) : (
         <>
           <div className="live-score-row">
-            <span>{formatTeam(match.team_a_player_ids, players)}</span>
+            <span>{formatDisplayTeam(match, "a", players)}</span>
             <strong>{match.team_a_score}</strong>
           </div>
           <div className="live-score-row">
-            <span>{formatTeam(match.team_b_player_ids, players)}</span>
+            <span>{formatDisplayTeam(match, "b", players)}</span>
             <strong>{match.team_b_score}</strong>
           </div>
         </>
       )}
+
+      {helperLabel ? <div className="match-helper-note">{helperLabel}</div> : null}
 
       <div className="match-card-footer">
         <span>{match.court_name ?? "Court pending"}</span>
         {showWinnerLabel ? (
           <span className={winnerKey ? "winner-pill" : "winner-pill muted"}>
             {winnerKey === "a"
-              ? `${formatTeam(match.team_a_player_ids, players)} won`
+              ? `${formatDisplayTeam(match, "a", players)} won`
               : winnerKey === "b"
-                ? `${formatTeam(match.team_b_player_ids, players)} won`
+                ? `${formatDisplayTeam(match, "b", players)} won`
                 : match.is_complete
                   ? "Draw"
                   : "Awaiting result"}

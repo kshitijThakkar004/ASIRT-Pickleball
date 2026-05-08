@@ -59,7 +59,7 @@ export function TournamentApp() {
     <PublicShell title="Standings" liveCount={liveMatchCount}>
       <section className="public-page-intro">
         <div className="public-kicker">Group standings</div>
-        <p>Track group-stage points and see only the courts that are live right now.</p>
+        <p>Track group-stage rankings and see only the courts that are live right now. Qualification is based on average points per match when match counts differ.</p>
       </section>
 
       <div className="group-tabs-wrap">
@@ -113,7 +113,7 @@ export function TournamentApp() {
                   <span>P</span>
                   <span>W</span>
                   <span>GD</span>
-                  <span>Pts</span>
+                  <span>Avg</span>
                 </div>
                 {rows.map((row) => (
                   <div className="standings-row" key={row.player.id}>
@@ -127,7 +127,7 @@ export function TournamentApp() {
                     <span className={row.differential >= 0 ? "good-diff" : "bad-diff"}>
                       {row.differential > 0 ? `+${row.differential}` : row.differential}
                     </span>
-                    <span>{row.pointsFor}</span>
+                    <span>{row.averagePoints.toFixed(1)}</span>
                   </div>
                 ))}
               </div>

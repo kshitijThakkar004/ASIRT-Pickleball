@@ -47,6 +47,8 @@ create table if not exists public.matches (
   scheduled_label text,
   team_a_player_ids uuid[] not null,
   team_b_player_ids uuid[] not null,
+  helper_player_ids uuid[] not null default '{}',
+  helper_for_player_ids uuid[] not null default '{}',
   team_a_score integer not null default 0 check (team_a_score >= 0 and team_a_score <= 15),
   team_b_score integer not null default 0 check (team_b_score >= 0 and team_b_score <= 15),
   is_live boolean not null default false,
@@ -56,6 +58,12 @@ create table if not exists public.matches (
 
 alter table public.matches
 add column if not exists match_kind text not null default 'scheduled';
+
+alter table public.matches
+add column if not exists helper_player_ids uuid[] not null default '{}';
+
+alter table public.matches
+add column if not exists helper_for_player_ids uuid[] not null default '{}';
 
 alter table public.matches
 drop constraint if exists matches_match_kind_check;
