@@ -422,15 +422,25 @@ function assignStandbyHelpers(
     courtName: string;
   }>,
   standbyPlayerIds: string[],
-  randomize: boolean
+  randomize: boolean,
+  minimumMatches: number = 3
 ) {
+  // Count each grouped player's total match appearances across the schedule
+  const matchCountByPlayer = new Map<string, number>();
+
+  matches.forEach((match) => {
+    [...match.teamA.playerIds, ...match.teamB.playerIds].forEach((playerId) => {
+      matchCountByPlayer.set(playerId, (matchCountByPlayer.get(playerId) ?? 0) + 1);
+    });
+  });
+
   const helperAssignments = new Map<number, HelperAssignment>();
   const helperRounds = new Map<string, number[]>();
   const relievedCountByPlayer = new Map<string, number>();
   const orderedMatches = randomize ? shuffle(matches.map((_, index) => index)) : matches.map((_, index) => index);
 
   standbyPlayerIds.forEach((helperPlayerId) => {
-    for (let appearance = 0; appearance < 3; appearance += 1) {
+    for (let appearance = 0; appearance < minimumMatches; appearance += 1) {
       const previousRounds = helperRounds.get(helperPlayerId) ?? [];
       const availableMatchIndexes = orderedMatches.filter((matchIndex) => !helperAssignments.has(matchIndex));
       const preferredIndexes = availableMatchIndexes.filter((matchIndex) => {
@@ -447,20 +457,31 @@ function assignStandbyHelpers(
         .map((matchIndex) => {
           const match = matches[matchIndex];
           const participants = [...match.teamA.playerIds, ...match.teamB.playerIds];
+          // Only consider players whose net match count would remain >= minimumMatches after being relieved
           const replacementOptions = participants
-            .map((playerId) => ({
-              playerId,
-              relievedCount: relievedCountByPlayer.get(playerId) ?? 0
-            }))
+            .map((playerId) => {
+              const currentRelieved = relievedCountByPlayer.get(playerId) ?? 0;
+              const totalAppearances = matchCountByPlayer.get(playerId) ?? 0;
+              const netMatchesAfterRelief = totalAppearances - currentRelieved - 1;
+
+              return {
+                playerId,
+                relievedCount: currentRelieved,
+                eligible: netMatchesAfterRelief >= minimumMatches
+              };
+            })
+            .filter((option) => option.eligible)
             .sort((left, right) => left.relievedCount - right.relievedCount);
 
           return {
             matchIndex,
-            relievedPlayerId: replacementOptions[0]?.playerId ?? participants[0],
-            relievedCount: replacementOptions[0]?.relievedCount ?? 0,
+            relievedPlayerId: replacementOptions[0]?.playerId ?? null,
+            relievedCount: replacementOptions[0]?.relievedCount ?? Infinity,
             roundOrder: match.roundOrder
           };
         })
+        // Only consider matches where at least one player can be relieved
+        .filter((candidate) => candidate.relievedPlayerId !== null)
         .sort((left, right) => {
           if (left.relievedCount !== right.relievedCount) {
             return left.relievedCount - right.relievedCount;
@@ -480,7 +501,9 @@ function assignStandbyHelpers(
 
       const selected = rankedCandidates[0];
 
-      if (!selected) {
+      if (!selected || selected.relievedPlayerId === null) {
+        // No grouped player can be relieved without dropping below the minimum.
+        // This standby player will get bonus matches instead.
         break;
       }
 
@@ -493,7 +516,7 @@ function assignStandbyHelpers(
     }
   });
 
-  return matches.map((match, index) => {
+  const helperAwareMatches = matches.map((match, index) => {
     const assignment = helperAssignments.get(index);
 
     return {
@@ -502,6 +525,8 @@ function assignStandbyHelpers(
       helperForPlayerIds: assignment ? [assignment.helperForPlayerId] : []
     };
   });
+
+  return { helperAwareMatches, helperRounds };
 }
 
 export function buildGroupStageAssets(
@@ -570,9 +595,15 @@ export function buildGroupStageAssets(
     .sort((left, right) => left[0] - right[0])
     .flatMap(([, pairings]) => buildRoundMatches(pairings, options, globalOpponentCounts));
   const scheduledMatches = scheduleGroupMatches(rawMatches, courtCount, Boolean(options.randomize));
-  const helperAwareMatches = assignStandbyHelpers(scheduledMatches, standbyPlayerIds, Boolean(options.randomize));
+  const minimumMatches = 3;
+  const { helperAwareMatches: relievedMatches, helperRounds } = assignStandbyHelpers(
+    scheduledMatches,
+    standbyPlayerIds,
+    Boolean(options.randomize),
+    minimumMatches
+  );
 
-  helperAwareMatches.forEach(({ teamA, teamB, roundOrder, courtName, helperPlayerIds, helperForPlayerIds }) => {
+  relievedMatches.forEach(({ teamA, teamB, roundOrder, courtName, helperPlayerIds, helperForPlayerIds }) => {
     matches.push({
       id: idFactory(),
       tournament_id: tournamentId,
@@ -594,6 +625,87 @@ export function buildGroupStageAssets(
       is_complete: false
     });
   });
+
+  // Determine the highest round_order used so far so bonus matches can be appended after
+  const maxRound = matches.reduce((maximum, match) => Math.max(maximum, match.round_order), 0);
+
+  // Generate bonus matches for standby players who still need more appearances
+  const bonusMatches: Match[] = [];
+  let bonusRound = maxRound + 1;
+
+  standbyPlayerIds.forEach((standbyId) => {
+    const helperAppearances = (helperRounds.get(standbyId) ?? []).length;
+    const bonusAppearances = bonusMatches.filter(
+      (match) => match.team_a_player_ids.includes(standbyId) || match.team_b_player_ids.includes(standbyId)
+    ).length;
+    const gamesNeeded = minimumMatches - helperAppearances - bonusAppearances;
+
+    if (gamesNeeded <= 0) {
+      return;
+    }
+
+    // Pick grouped players to fill the bonus match slots
+    // Try to pick partners who have the fewest bonus appearances to keep things fair
+    const bonusCountByPlayer = new Map<string, number>();
+
+    bonusMatches.forEach((match) => {
+      [...match.team_a_player_ids, ...match.team_b_player_ids].forEach((playerId) => {
+        bonusCountByPlayer.set(playerId, (bonusCountByPlayer.get(playerId) ?? 0) + 1);
+      });
+    });
+
+    for (let game = 0; game < gamesNeeded; game += 1) {
+      // Sort grouped players by how many bonus matches they have (ascending), then shuffle for variety
+      const availablePartners = groupedPlayerIds
+        .filter((playerId) => playerId !== standbyId)
+        .sort((left, right) => {
+          const leftCount = bonusCountByPlayer.get(left) ?? 0;
+          const rightCount = bonusCountByPlayer.get(right) ?? 0;
+
+          if (leftCount !== rightCount) {
+            return leftCount - rightCount;
+          }
+
+          return randomTieBreaker(Boolean(options.randomize)) - randomTieBreaker(Boolean(options.randomize));
+        });
+
+      // We need 3 grouped players: 1 teammate for standby + 2 opponents
+      if (availablePartners.length < 3) {
+        break;
+      }
+
+      const partner = availablePartners[0];
+      const opponentOne = availablePartners[1];
+      const opponentTwo = availablePartners[2];
+
+      const bonusMatch: Match = {
+        id: idFactory(),
+        tournament_id: tournamentId,
+        group_id: null,
+        match_kind: "scheduled",
+        stage: "group",
+        round_order: bonusRound,
+        court_name: `Court 1`,
+        scheduled_label: `Bonus Match`,
+        team_a_player_ids: [standbyId, partner],
+        team_b_player_ids: [opponentOne, opponentTwo],
+        helper_player_ids: [],
+        helper_for_player_ids: [],
+        team_a_score: 0,
+        team_b_score: 0,
+        is_live: false,
+        is_complete: false
+      };
+
+      bonusMatches.push(bonusMatch);
+      bonusCountByPlayer.set(partner, (bonusCountByPlayer.get(partner) ?? 0) + 1);
+      bonusCountByPlayer.set(opponentOne, (bonusCountByPlayer.get(opponentOne) ?? 0) + 1);
+      bonusCountByPlayer.set(opponentTwo, (bonusCountByPlayer.get(opponentTwo) ?? 0) + 1);
+      bonusRound += 1;
+    }
+  });
+
+  matches.push(...bonusMatches);
 
   return { groups, groupPlayers, matches, standbyPlayerIds };
 }
