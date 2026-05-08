@@ -19,6 +19,7 @@ export function LeaderboardTable({ rows }: LeaderboardTableProps) {
           <tr>
             <th>Rank</th>
             <th>Player</th>
+            <th>Avg</th>
             <th>Points</th>
             <th>Against</th>
             <th>Diff</th>
@@ -32,6 +33,7 @@ export function LeaderboardTable({ rows }: LeaderboardTableProps) {
             <tr key={row.player.id}>
               <td className="leaderboard-rank">{row.rank}</td>
               <td>{row.player.name}</td>
+              <td>{row.averagePoints.toFixed(2)}</td>
               <td>{row.pointsFor}</td>
               <td>{row.pointsAgainst}</td>
               <td>{row.differential > 0 ? `+${row.differential}` : row.differential}</td>

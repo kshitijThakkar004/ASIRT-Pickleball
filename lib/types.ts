@@ -43,6 +43,8 @@ export interface Match {
   scheduled_label: string | null;
   team_a_player_ids: string[];
   team_b_player_ids: string[];
+  helper_player_ids?: string[];
+  helper_for_player_ids?: string[];
   team_a_score: number;
   team_b_score: number;
   is_live: boolean;
@@ -58,6 +60,8 @@ export interface LeaderboardRow {
   differential: number;
   matchesPlayed: number;
   wins: number;
+  averagePoints: number;
+  averageDifferential: number;
 }
 
 export interface TournamentState {

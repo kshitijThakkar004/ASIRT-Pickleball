@@ -17,6 +17,11 @@ interface GroupStagePairing {
   partnerRound: number;
 }
 
+interface HelperAssignment {
+  helperPlayerId: string;
+  helperForPlayerId: string;
+}
+
 export function shuffle<T>(values: T[]) {
   const copy = [...values];
 
@@ -151,6 +156,63 @@ function cloneGroupCounter(counter: Map<string, Map<string, number>>) {
 
 function randomTieBreaker(randomize: boolean) {
   return randomize ? Math.random() : 0;
+}
+
+function getHelperAssignments(match: Match): HelperAssignment[] {
+  const helperIds = match.helper_player_ids ?? [];
+  const helperForIds = match.helper_for_player_ids ?? [];
+  const total = Math.min(helperIds.length, helperForIds.length);
+
+  return Array.from({ length: total }, (_, index) => ({
+    helperPlayerId: helperIds[index],
+    helperForPlayerId: helperForIds[index]
+  }));
+}
+
+export function getDisplayTeamPlayerIds(match: Match, team: "a" | "b") {
+  const source = team === "a" ? match.team_a_player_ids : match.team_b_player_ids;
+  const assignments = getHelperAssignments(match);
+
+  return source.map((playerId) => assignments.find((assignment) => assignment.helperForPlayerId === playerId)?.helperPlayerId ?? playerId);
+}
+
+export function getAllMatchParticipantIds(match: Match) {
+  return Array.from(
+    new Set([
+      ...match.team_a_player_ids,
+      ...match.team_b_player_ids,
+      ...(match.helper_player_ids ?? [])
+    ])
+  );
+}
+
+export function getDisplayParticipantIds(match: Match) {
+  return Array.from(new Set([...getDisplayTeamPlayerIds(match, "a"), ...getDisplayTeamPlayerIds(match, "b")]));
+}
+
+export function getHelperLabel(match: Match, players: Player[]) {
+  const helperIds = match.helper_player_ids ?? [];
+  const helperForIds = match.helper_for_player_ids ?? [];
+
+  if (helperIds.length === 0 || helperForIds.length === 0) {
+    return null;
+  }
+
+  const playerMap = new Map(players.map((player) => [player.id, player.name]));
+  const parts = helperIds
+    .map((helperId, index) => {
+      const helperName = playerMap.get(helperId);
+      const relievedName = playerMap.get(helperForIds[index] ?? "");
+
+      if (!helperName || !relievedName) {
+        return null;
+      }
+
+      return `${helperName} playing in place of ${relievedName}`;
+    })
+    .filter((value): value is string => Boolean(value));
+
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 function buildRoundMatches(
@@ -352,31 +414,126 @@ function scheduleGroupMatches(
   return scheduled;
 }
 
+function assignStandbyHelpers(
+  matches: Array<{
+    teamA: GroupStagePairing;
+    teamB: GroupStagePairing;
+    roundOrder: number;
+    courtName: string;
+  }>,
+  standbyPlayerIds: string[],
+  randomize: boolean
+) {
+  const helperAssignments = new Map<number, HelperAssignment>();
+  const helperRounds = new Map<string, number[]>();
+  const relievedCountByPlayer = new Map<string, number>();
+  const orderedMatches = randomize ? shuffle(matches.map((_, index) => index)) : matches.map((_, index) => index);
+
+  standbyPlayerIds.forEach((helperPlayerId) => {
+    for (let appearance = 0; appearance < 3; appearance += 1) {
+      const previousRounds = helperRounds.get(helperPlayerId) ?? [];
+      const availableMatchIndexes = orderedMatches.filter((matchIndex) => !helperAssignments.has(matchIndex));
+      const preferredIndexes = availableMatchIndexes.filter((matchIndex) => {
+        const roundOrder = matches[matchIndex]?.roundOrder ?? 0;
+        return previousRounds.every((previousRound) => Math.abs(roundOrder - previousRound) >= 2);
+      });
+      const candidateIndexes = preferredIndexes.length > 0 ? preferredIndexes : availableMatchIndexes;
+
+      if (candidateIndexes.length === 0) {
+        break;
+      }
+
+      const rankedCandidates = candidateIndexes
+        .map((matchIndex) => {
+          const match = matches[matchIndex];
+          const participants = [...match.teamA.playerIds, ...match.teamB.playerIds];
+          const replacementOptions = participants
+            .map((playerId) => ({
+              playerId,
+              relievedCount: relievedCountByPlayer.get(playerId) ?? 0
+            }))
+            .sort((left, right) => left.relievedCount - right.relievedCount);
+
+          return {
+            matchIndex,
+            relievedPlayerId: replacementOptions[0]?.playerId ?? participants[0],
+            relievedCount: replacementOptions[0]?.relievedCount ?? 0,
+            roundOrder: match.roundOrder
+          };
+        })
+        .sort((left, right) => {
+          if (left.relievedCount !== right.relievedCount) {
+            return left.relievedCount - right.relievedCount;
+          }
+
+          const leftNearestGap =
+            previousRounds.length > 0 ? Math.min(...previousRounds.map((round) => Math.abs(left.roundOrder - round))) : 99;
+          const rightNearestGap =
+            previousRounds.length > 0 ? Math.min(...previousRounds.map((round) => Math.abs(right.roundOrder - round))) : 99;
+
+          if (rightNearestGap !== leftNearestGap) {
+            return rightNearestGap - leftNearestGap;
+          }
+
+          return left.matchIndex - right.matchIndex;
+        });
+
+      const selected = rankedCandidates[0];
+
+      if (!selected) {
+        break;
+      }
+
+      helperAssignments.set(selected.matchIndex, {
+        helperPlayerId,
+        helperForPlayerId: selected.relievedPlayerId
+      });
+      helperRounds.set(helperPlayerId, [...previousRounds, selected.roundOrder]);
+      relievedCountByPlayer.set(selected.relievedPlayerId, (relievedCountByPlayer.get(selected.relievedPlayerId) ?? 0) + 1);
+    }
+  });
+
+  return matches.map((match, index) => {
+    const assignment = helperAssignments.get(index);
+
+    return {
+      ...match,
+      helperPlayerIds: assignment ? [assignment.helperPlayerId] : [],
+      helperForPlayerIds: assignment ? [assignment.helperForPlayerId] : []
+    };
+  });
+}
+
 export function buildGroupStageAssets(
   tournamentId: string,
   playerIds: string[],
   options: BuildGroupStageAssetsOptions = {}
 ) {
-  if (playerIds.length === 0 || playerIds.length % 4 !== 0) {
-    throw new Error("Active players must be divisible into groups of 4.");
+  if (playerIds.length < 8) {
+    throw new Error("At least 8 active players are required before groups can be generated.");
   }
 
-  if (playerIds.length < 8) {
-    throw new Error("At least 8 active players are required so group pairings can face teams from the wider pool.");
+  const remainder = playerIds.length % 4;
+  const groupedPlayerCount = playerIds.length - remainder;
+
+  if (groupedPlayerCount < 8) {
+    throw new Error("At least 8 grouped players are required so partner pairings can face the wider pool.");
   }
 
   const idFactory = options.idFactory ?? (() => crypto.randomUUID());
   const courtCount = Math.max(1, options.courtCount ?? 1);
   const shuffledPlayerIds = options.randomize === false ? [...playerIds] : shuffle(playerIds);
+  const groupedPlayerIds = shuffledPlayerIds.slice(0, groupedPlayerCount);
+  const standbyPlayerIds = shuffledPlayerIds.slice(groupedPlayerCount);
   const groups: Group[] = [];
   const groupPlayers: GroupPlayer[] = [];
   const matches: Match[] = [];
   const pairingsByPartnerRound = new Map<number, GroupStagePairing[]>();
 
-  for (let index = 0; index < shuffledPlayerIds.length; index += 4) {
+  for (let index = 0; index < groupedPlayerIds.length; index += 4) {
     const groupNumber = index / 4 + 1;
     const groupId = idFactory();
-    const groupRoster = shuffledPlayerIds.slice(index, index + 4);
+    const groupRoster = groupedPlayerIds.slice(index, index + 4);
 
     groups.push({
       id: groupId,
@@ -413,8 +570,9 @@ export function buildGroupStageAssets(
     .sort((left, right) => left[0] - right[0])
     .flatMap(([, pairings]) => buildRoundMatches(pairings, options, globalOpponentCounts));
   const scheduledMatches = scheduleGroupMatches(rawMatches, courtCount, Boolean(options.randomize));
+  const helperAwareMatches = assignStandbyHelpers(scheduledMatches, standbyPlayerIds, Boolean(options.randomize));
 
-  scheduledMatches.forEach(({ teamA, teamB, roundOrder, courtName }) => {
+  helperAwareMatches.forEach(({ teamA, teamB, roundOrder, courtName, helperPlayerIds, helperForPlayerIds }) => {
     matches.push({
       id: idFactory(),
       tournament_id: tournamentId,
@@ -428,6 +586,8 @@ export function buildGroupStageAssets(
       )} ${teamB.label}`,
       team_a_player_ids: teamA.playerIds,
       team_b_player_ids: teamB.playerIds,
+      helper_player_ids: helperPlayerIds,
+      helper_for_player_ids: helperForPlayerIds,
       team_a_score: 0,
       team_b_score: 0,
       is_live: false,
@@ -435,7 +595,7 @@ export function buildGroupStageAssets(
     });
   });
 
-  return { groups, groupPlayers, matches };
+  return { groups, groupPlayers, matches, standbyPlayerIds };
 }
 
 export function calculateLeaderboard(players: Player[], matches: Match[]) {
@@ -464,8 +624,10 @@ export function calculateLeaderboard(players: Player[], matches: Match[]) {
 
   for (const match of groupMatches) {
     const winnerKey = match.team_a_score === match.team_b_score ? null : match.team_a_score > match.team_b_score ? "a" : "b";
+    const teamAPlayerIds = getDisplayTeamPlayerIds(match, "a");
+    const teamBPlayerIds = getDisplayTeamPlayerIds(match, "b");
 
-    match.team_a_player_ids.forEach((playerId) => {
+    teamAPlayerIds.forEach((playerId) => {
       const bucket = totals.get(playerId);
 
       if (!bucket) {
@@ -481,7 +643,7 @@ export function calculateLeaderboard(players: Player[], matches: Match[]) {
       }
     });
 
-    match.team_b_player_ids.forEach((playerId) => {
+    teamBPlayerIds.forEach((playerId) => {
       const bucket = totals.get(playerId);
 
       if (!bucket) {
@@ -513,11 +675,21 @@ export function calculateLeaderboard(players: Player[], matches: Match[]) {
         pointsAgainst: total.pointsAgainst,
         differential: total.pointsFor - total.pointsAgainst,
         matchesPlayed: total.matchesPlayed,
-        wins: total.wins
+        wins: total.wins,
+        averagePoints: total.matchesPlayed > 0 ? total.pointsFor / total.matchesPlayed : 0,
+        averageDifferential: total.matchesPlayed > 0 ? (total.pointsFor - total.pointsAgainst) / total.matchesPlayed : 0
       } satisfies LeaderboardRow;
     })
     .filter((row): row is LeaderboardRow => Boolean(row))
     .sort((left, right) => {
+      if (right.averagePoints !== left.averagePoints) {
+        return right.averagePoints - left.averagePoints;
+      }
+
+      if (right.averageDifferential !== left.averageDifferential) {
+        return right.averageDifferential - left.averageDifferential;
+      }
+
       if (right.pointsFor !== left.pointsFor) {
         return right.pointsFor - left.pointsFor;
       }
@@ -562,6 +734,8 @@ export function buildKnockoutMatches(tournamentId: string, playerIds: string[], 
       scheduled_label: stage === "quarterfinal" ? `Quarter Final ${index / 2 + 1}` : `Semi Final ${index / 2 + 1}`,
       team_a_player_ids: teams[index],
       team_b_player_ids: teams[index + 1],
+      helper_player_ids: [],
+      helper_for_player_ids: [],
       team_a_score: 0,
       team_b_score: 0,
       is_live: false,
@@ -607,6 +781,8 @@ export function buildFinalStageMatches(tournamentId: string, semifinalMatches: M
       scheduled_label: "Final",
       team_a_player_ids: randomizedWinners.slice(0, 2),
       team_b_player_ids: randomizedWinners.slice(2, 4),
+      helper_player_ids: [],
+      helper_for_player_ids: [],
       team_a_score: 0,
       team_b_score: 0,
       is_live: false,
@@ -623,6 +799,8 @@ export function buildFinalStageMatches(tournamentId: string, semifinalMatches: M
       scheduled_label: "Third Place",
       team_a_player_ids: randomizedLosers.slice(0, 2),
       team_b_player_ids: randomizedLosers.slice(2, 4),
+      helper_player_ids: [],
+      helper_for_player_ids: [],
       team_a_score: 0,
       team_b_score: 0,
       is_live: false,
@@ -664,6 +842,10 @@ export function collectAdvancingPlayers(matches: Match[]) {
 export function formatTeam(playerIds: string[], players: Player[]) {
   const playerMap = new Map(players.map((player) => [player.id, player.name]));
   return playerIds.map((playerId) => playerMap.get(playerId) ?? "Unknown").join(" / ");
+}
+
+export function formatDisplayTeam(match: Match, team: "a" | "b", players: Player[]) {
+  return formatTeam(getDisplayTeamPlayerIds(match, team), players);
 }
 
 function extractCourtNumber(courtName: string | null) {
